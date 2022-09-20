@@ -12,4 +12,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 92730ba651cc0974384972639f10125a, type: 3}
   m_Name: MyRenderPipelineAsset
   m_EditorClassIdentifier: 
+  TargetsAndOutputsCount: 0
   BlitCopy: {fileID: 4800000, guid: 24c9e7755aba5ba47851c3b6a5643be3, type: 3}

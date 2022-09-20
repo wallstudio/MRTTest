@@ -13,10 +13,13 @@ Shader "MyRender/Unlit"
             ZTest Off
 
             HLSLPROGRAM
-            #pragma vertex vert
-            #pragma fragment frag
             #pragma enable_d3d11_debug_symbols
             #pragma hlslcc_bytecode_disassembly
+
+            #pragma multi_compile _ ENABLE_MRT
+
+            #pragma vertex vert
+            #pragma fragment frag
 
             half4 _Color;
             Texture2D<half4> _MainTex;
@@ -28,19 +31,25 @@ Shader "MyRender/Unlit"
                 return mul(unity_MatrixVP, mul(unity_ObjectToWorld, vertex));
             }
 
-            struct Target
+            class Target
             {
                 half4 color0 : SV_Target0;
-                half4 color1 : SV_Target1;
-                half4 color2 : SV_Target2;
+
+                #if defined(ENABLE_MRT)
+                    half4 color1 : SV_Target1;
+                    half4 color2 : SV_Target2;
+                #endif
             };
 
             void frag(float4 vertex : SV_Position, float2 uv : TEXCOORD0, half4 color : COLOR, out Target target)
             {
                 half3 tex = _MainTex.Sample(sampler_MainTex, uv).rgb * color.rgb * _Color.rgb;
                 target.color0 = half4(tex, color.a * _Color.a);
-                target.color1 = half4(1 - tex, color.a * _Color.a);
-                target.color2 = half4((tex.r + tex.g + tex.b).xxx / 3, color.a * _Color.a);
+                
+                #if defined(ENABLE_MRT)
+                    target.color1 = half4(1 - tex, color.a * _Color.a);
+                    target.color2 = half4((tex.r + tex.g + tex.b).xxx / 3, color.a * _Color.a);
+                #endif
             }
             ENDHLSL
 

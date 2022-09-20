@@ -6,9 +6,13 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using Unity.Collections.LowLevel.Unsafe;
 
+
+public enum TargetsAndOutputsCountMode { SomeCount, TargetsIsFewThanOutputs, OutputsIsFewThanTargets, }
+
 [CreateAssetMenu(menuName = "MyRenderer")]
 public class MyRenderPipelineAsset : RenderPipelineAsset
 {
+    [SerializeField] public TargetsAndOutputsCountMode TargetsAndOutputsCount;
     [SerializeField] public Shader BlitCopy;
     protected override RenderPipeline CreatePipeline() => new MyRender(this);
 }
@@ -16,10 +20,12 @@ public class MyRenderPipelineAsset : RenderPipelineAsset
 public class MyRender : RenderPipeline
 {
     readonly ShaderTagId m_ShaderTag = new ShaderTagId("SRPDefaultUnlit");
+    readonly GlobalKeyword m_EnableMrtKeyword = GlobalKeyword.Create("ENABLE_MRT");
     readonly int _Depth = Shader.PropertyToID(nameof(_Depth));
     readonly int _Color0 = Shader.PropertyToID(nameof(_Color0)), _Color1 = Shader.PropertyToID(nameof(_Color1)), _Color2 = Shader.PropertyToID(nameof(_Color2));
     readonly ProfilingSampler m_DrawSampler = new ProfilingSampler($"{nameof(MyRender)}_Draw");
     readonly ProfilingSampler m_FinalBlitSampler = new ProfilingSampler($"{nameof(MyRender)}_FinalBlit");
+    readonly MyRenderPipelineAsset m_Asset;
     readonly Material m_Material;
     readonly Mesh m_Mesh = new Mesh()
     {
@@ -29,7 +35,7 @@ public class MyRender : RenderPipeline
         hideFlags = HideFlags.HideAndDontSave,
     };
 
-    public MyRender(MyRenderPipelineAsset asset) => m_Material = CoreUtils.CreateEngineMaterial(asset.BlitCopy);
+    public MyRender(MyRenderPipelineAsset asset) => (m_Asset, m_Material) = (asset, CoreUtils.CreateEngineMaterial(asset.BlitCopy));
 
     protected override void Render(ScriptableRenderContext context, Camera[] cameras)
     {
@@ -55,6 +61,10 @@ public class MyRender : RenderPipeline
             cmd.Cmd.GetTemporaryRT(_Color0, camera.pixelWidth, camera.pixelHeight, 0, FilterMode.Bilinear, GraphicsFormat.R8G8B8A8_UNorm);
             cmd.Cmd.GetTemporaryRT(_Color1, camera.pixelWidth, camera.pixelHeight, 0, FilterMode.Bilinear, GraphicsFormat.R8G8B8A8_UNorm);
             cmd.Cmd.GetTemporaryRT(_Color2, camera.pixelWidth, camera.pixelHeight, 0, FilterMode.Bilinear, GraphicsFormat.R8G8B8A8_UNorm);
+            cmd.Cmd.Blit(Texture2D.whiteTexture, _Depth);
+            cmd.Cmd.Blit(Texture2D.blackTexture, _Color0);
+            cmd.Cmd.Blit(Texture2D.blackTexture, _Color1);
+            cmd.Cmd.Blit(Texture2D.blackTexture, _Color2);
         }
 
         // Draw
@@ -87,7 +97,23 @@ public class MyRender : RenderPipeline
         }).ToNativeArray(Allocator.Temp);
         using (context.BeginScopedRenderPass(camera.pixelWidth, camera.pixelHeight, 1, attachments, 0))
         {
-            using var colors = (stackalloc[] { 1, 2, 3, }).ToNativeArray(Allocator.Temp);
+            Span<int> colorsOnStack = stackalloc int[0];
+            switch (m_Asset.TargetsAndOutputsCount)
+            {
+                case TargetsAndOutputsCountMode.SomeCount:
+                    colorsOnStack = stackalloc[] { 1, 2, 3};
+                    Shader.SetKeyword(m_EnableMrtKeyword, true);
+                    break;
+                case TargetsAndOutputsCountMode.TargetsIsFewThanOutputs:
+                    colorsOnStack = stackalloc[] { 1, };
+                    Shader.SetKeyword(m_EnableMrtKeyword, true);
+                    break;
+                case TargetsAndOutputsCountMode.OutputsIsFewThanTargets:
+                    colorsOnStack = stackalloc[] { 1, 2, 3};
+                    Shader.SetKeyword(m_EnableMrtKeyword, false);
+                    break;
+            }
+            using var colors = colorsOnStack.ToNativeArray(Allocator.Temp);
             using (context.BeginScopedSubPass(colors))
             {
                 using (var cmd = new CommandsScope(context)) { m_DrawSampler.Begin(cmd.Cmd); }
@@ -127,6 +153,7 @@ public class MyRender : RenderPipeline
             cmd.Cmd.ReleaseTemporaryRT(_Color0);
             cmd.Cmd.ReleaseTemporaryRT(_Color1);
             cmd.Cmd.ReleaseTemporaryRT(_Color2);
+            cmd.Cmd.SetRenderTarget(RenderTargetHandle.CameraTarget.Identifier());
         }
     }
 }
